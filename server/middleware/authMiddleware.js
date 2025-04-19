@@ -1,40 +1,69 @@
-import jwt from "jsonwebtoken";
-import User from "../models/User.js";
+const jwt = require('jsonwebtoken');
+const User = require('../models/User');
 
+// Protect routes
 const protect = async (req, res, next) => {
-  let token;
-  if (
-    req.headers.authorization &&
-    req.headers.authorization.startsWith("Bearer")
-  ) {
-    try {
-      token = req.headers.authorization.split(" ")[1];
-      const decoded = jwt.verify(token, process.env.JWT_SECRET);
-      req.user = await User.findById(decoded.id).select("-password");
-      next();
-    } catch (error) {
-      res.status(401).json({ message: "Not authorized, token failed" });
+    let token;
+
+    // Get token from cookie
+    if (req.cookies.token) {
+        token = req.cookies.token;
     }
-  }
-  if (!token) {
-    res.status(401).json({ message: "Not authorized, no token" });
-  }
+
+    // Make sure token exists
+    if (!token) {
+        return res.status(401).json({ message: 'Not authorized to access this route' });
+    }
+
+    try {
+        // Verify token
+        const decoded = jwt.verify(token, process.env.JWT_SECRET);
+
+        // Get user from the token
+        req.user = await User.findById(decoded.id).select('-password');
+
+        if (!req.user) {
+            return res.status(401).json({ message: 'Not authorized to access this route' });
+        }
+
+        next();
+    } catch (error) {
+        return res.status(401).json({ message: 'Not authorized to access this route' });
+    }
 };
 
-const admin = (req, res, next) => {
-  if (req.user && req.user.role === "admin") {
-    next();
-  } else {
-    res.status(401).json({ message: "Not authorized as an admin" });
-  }
+// Grant access to specific roles
+const authorize = (...roles) => {
+    return (req, res, next) => {
+        if (!roles.includes(req.user.role)) {
+            return res.status(403).json({
+                message: `User role ${req.user.role} is not authorized to access this route`
+            });
+        }
+        next();
+    };
 };
 
-const roleCheck = (role) => (req, res, next) => {
-  if (req.user && req.user.role === role) {
-    next();
-  } else {
-    res.status(401).json({ message: `Not authorized as a ${role}` });
-  }
+// Grant access to specific admin positions
+const authorizeAdminPosition = (...positions) => {
+    return (req, res, next) => {
+        if (req.user.role !== 'admin') {
+            return res.status(403).json({
+                message: 'Only admin users can access this route'
+            });
+        }
+
+        if (!positions.includes(req.user.adminInfo.position)) {
+            return res.status(403).json({
+                message: `Admin position ${req.user.adminInfo.position} is not authorized to access this route`
+            });
+        }
+        next();
+    };
 };
 
-export { protect, admin, roleCheck };
+module.exports = {
+    protect,
+    authorize,
+    authorizeAdminPosition
+};
